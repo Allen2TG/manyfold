@@ -1,0 +1,200 @@
+# Manyfold Docker Compose 配置文件 - Linux 生产环境版本
+# 针对 CIFS/SMB 网络共享优化
+# 挂载点: /mnt/L (192.168.1.25/vfxlibrary)
+# 数据存储目录: /mnt/L/Manyfold
+# 
+# ✅ 目录结构已创建:
+#    /mnt/L/Manyfold/models   - 3D模型存储
+#    /mnt/L/Manyfold/storage  - 应用数据存储
+#
+# 使用方法：docker-compose -f docker-compose.production.linux.yml up -d
+
+services:
+  app:
+    # 使用本地构建的镜像，包含你的所有修改
+    build:
+      context: .
+      dockerfile: Dockerfile.custom
+      args:
+        APP_VERSION: production-linux
+        GIT_SHA: local-build
+    image: manyfold-custom:production-linux
+    container_name: manyfold-app
+    ports:
+      - "3214:3214"
+    volumes:
+      # ✅ 使用 Manyfold 目录存储所有数据
+      - /mnt/L/Manyfold/models:/models
+      - /mnt/L/Manyfold/storage:/usr/src/app/storage
+      
+    environment:
+      # 用户和组ID配置 - 使用 root (因为 CIFS 挂载 uid=0)
+      PUID: 0
+      PGID: 0
+      
+      # 核心安全配置 - ✅ 已使用强随机密钥
+      # 生成方式: openssl rand -hex 64
+      SECRET_KEY_BASE: 8c60a26098c73abaa408a0b03f932c5fdebe616b5d968ba82e61aecc09e08ee2280670f9853ec233670c151980012af0401aa0fde4c21a5228edfafb10fa8042
+      
+      # Redis连接
+      REDIS_URL: redis://redis:6379/1
+      
+      # PostgreSQL数据库连接
+      DATABASE_ADAPTER: postgresql
+      DATABASE_HOST: postgres
+      DATABASE_PORT: 5432
+      DATABASE_USER: manyfold
+      DATABASE_PASSWORD: Phenom2025
+      DATABASE_NAME: manyfold
+      
+      # 应用配置
+      RAILS_ENV: production
+      RACK_ENV: production
+      NODE_ENV: production
+      PORT: 3214
+      
+      # 多用户模式配置 - 已启用
+      MULTIUSER: enabled
+      REGISTRATION_ENABLED: public
+      
+      # 密码强度要求 (0=不安全, 4=最安全, 默认4)
+      # 设置为3，在安全性和用户体验之间平衡
+      MIN_PASSWORD_SCORE: 3
+      
+      # 文件上传限制 - 100GB (107374182400 字节)
+      MAX_FILE_UPLOAD_SIZE: 107374182400
+      # 从压缩包中提取的最大文件大小 - 100GB
+      MAX_FILE_EXTRACT_SIZE: 107374182400
+      
+      # CIFS/NFS 特殊配置（针对网络共享）
+      # 增加超时时间，避免网络问题
+      RAILS_MAX_THREADS: 5
+      
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      db-migrate:
+        condition: service_completed_successfully
+    networks:
+      - manyfold
+    restart: unless-stopped
+    
+    # 针对 CIFS 挂载的安全配置调整
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - SETUID
+      - SETGID
+      - FOWNER        # CIFS 需要
+      - DAC_READ_SEARCH  # CIFS 需要
+      
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3214/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 90s  # CIFS 挂载可能需要更长启动时间
+
+  postgres:
+    image: postgres:15-alpine
+    container_name: manyfold-postgres
+    volumes:
+      # 数据库数据存储在本地高速磁盘，而非网络共享
+      - db_data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_USER: manyfold
+      POSTGRES_PASSWORD: Phenom2025  # ✅ 已设置
+      POSTGRES_DB: manyfold
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
+    restart: unless-stopped
+    networks:
+      - manyfold
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U manyfold -d manyfold"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: manyfold-redis
+    command: redis-server --appendonly yes
+    volumes:
+      # Redis 数据也存储在本地高速磁盘
+      - redis_data:/data
+    restart: unless-stopped
+    networks:
+      - manyfold
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # 数据库迁移服务 - 自动初始化和迁移数据库
+  db-migrate:
+    image: manyfold-custom:production-linux
+    container_name: manyfold-db-migrate
+    environment:
+      # 使用相同的数据库配置
+      DATABASE_ADAPTER: postgresql
+      DATABASE_HOST: postgres
+      DATABASE_PORT: 5432
+      DATABASE_USER: manyfold
+      DATABASE_PASSWORD: Phenom2025
+      DATABASE_NAME: manyfold
+      SECRET_KEY_BASE: 8c60a26098c73abaa408a0b03f932c5fdebe616b5d968ba82e61aecc09e08ee2280670f9853ec233670c151980012af0401aa0fde4c21a5228edfafb10fa8042
+      RAILS_ENV: production
+      RACK_ENV: production
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - manyfold
+    command: >
+      sh -c "
+        echo '🗄️  等待数据库完全就绪...' &&
+        sleep 10 &&
+        echo '🗄️  开始数据库迁移...' &&
+        bundle exec rails db:migrate &&
+        echo '✅ 数据库迁移完成！' &&
+        echo '' &&
+        echo '📊 生产环境配置：' &&
+        echo '   - 部署环境: Linux (CentOS/RHEL)' &&
+        echo '   - 存储位置: /mnt/L (CIFS 网络共享)' &&
+        echo '   - 服务器: 192.168.1.25' &&
+        echo '   - 可用空间: 6.3TB' &&
+        echo '   - 多用户模式: 已启用' &&
+        echo '   - 密码强度要求: 3 (中高安全性)' &&
+        echo '   - 文件上传限制: 100GB' &&
+        echo '   - 文件解压限制: 100GB' &&
+        echo '' &&
+        echo '🌐 访问地址: http://服务器IP:3214'
+      "
+    restart: "no"  # 只运行一次
+
+volumes:
+  # 数据库和 Redis 使用本地 Docker 卷（更快更可靠）
+  db_data:
+    driver: local
+  redis_data:
+    driver: local
+  # 如果 CIFS 不可用，可以使用本地卷作为备选
+  # app_storage:
+  #   driver: local
+
+networks:
+  manyfold:
+    driver: bridge
+
+

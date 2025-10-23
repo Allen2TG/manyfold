@@ -1,21 +1,79 @@
-/docker/*.dockerfile
-/docker-compose.*
-/.dockerignore
-/.bundle
-/db/*.sqlite3
-/db/*.sqlite3-*
-/log/*
-/tmp/*
-/storage/*
-/public/assets
+# Git 相关
+.git
+.gitignore
+.gitattributes
+
+# 文档
+*.md
+docs/
+DOCKER_*.md
+
+# 开发环境
+.vscode/
+.idea/
+.devcontainer/
+
+# 测试相关
+spec/
+test/
+coverage/
+.rspec
+
+# 临时文件和日志
+tmp/
+log/*.log
+*.swp
+*.swo
+*~
+
+# 本地配置
+.env*
+!.env.example
+# config/database.yml  # 注释掉，生产环境需要此文件通过环境变量配置
+config/credentials.yml.enc
+config/master.key
+
+# Node 模块 (会在构建时安装)
+node_modules/
+
+# Ruby gems (会在构建时安装)
+vendor/bundle/
+
+# 已编译的资源 (会在构建时生成)
+public/assets/
+public/packs/
+public/packs-test/
+
+# 存储和上传的文件
+storage/
+public/uploads/
+
+# 数据库文件
+*.sqlite3
+*.sqlite3-journal
+db/*.sqlite3
+
+# OS 相关
+.DS_Store
+Thumbs.db
+
+# Docker 相关
+docker-compose*.yml
+!docker-compose.example.yml
+Dockerfile*
+.dockerignore
+
+# 备份文件
+backups/
+*.bak
+*.backup
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+.travis.yml
+
+# 其他
+*.pid
+*.seed
 .byebug_history
-/config/master.key
-/public/packs
-/public/packs-test
-/node_modules
-/yarn-error.log
-/yarn-debug.log*
-/.yarn-integrity
-/.env
-/config/credentials/*.key
-/.git

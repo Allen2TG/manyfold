@@ -73,6 +73,15 @@ class Scan::Model::ParseMetadataJob < ApplicationJob
   end
 
   def preview_priority(file)
+    # Get filename without extension
+    filename_without_ext = File.basename(file.filename.to_s, ".*")
+
+    # Highest priority: files ending with _Preview that are images or renderable
+    if filename_without_ext.end_with?("_Preview") && (file.is_image? || file.is_renderable?)
+      return -1
+    end
+
+    # Original rules
     return 0 if file.is_image?
     return 1 if file.is_renderable?
     100

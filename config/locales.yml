@@ -7,7 +7,8 @@ ready:
 - ja
 - nl
 - pl
+- zh-CN
 experimental:
 - pt
 - ru
-- zh-CN
+

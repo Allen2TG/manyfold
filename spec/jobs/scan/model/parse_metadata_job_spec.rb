@@ -21,6 +21,59 @@ RSpec.describe Scan::Model::ParseMetadataJob do
     end
   end
 
+  context "with files including _Preview suffix" do
+    let(:model) { create(:model) }
+
+    context "when _Preview image exists" do
+      before do
+        create(:model_file, model: model, filename: "regular_image.jpg")
+        create(:model_file, model: model, filename: "model_Preview.jpg")
+        create(:model_file, model: model, filename: "part.obj")
+      end
+
+      it "prioritizes the _Preview suffixed image file" do
+        expect { described_class.perform_now(model.id) }
+          .to change { model.reload.preview_file&.filename }.to("model_Preview.jpg")
+      end
+    end
+
+    context "when _Preview 3D model exists" do
+      before do
+        create(:model_file, model: model, filename: "regular_model.obj")
+        create(:model_file, model: model, filename: "preview_model_Preview.stl")
+      end
+
+      it "prioritizes the _Preview suffixed 3D model file" do
+        expect { described_class.perform_now(model.id) }
+          .to change { model.reload.preview_file&.filename }.to("preview_model_Preview.stl")
+      end
+    end
+
+    context "when both _Preview image and regular images exist" do
+      before do
+        create(:model_file, model: model, filename: "aaa_first.jpg")
+        create(:model_file, model: model, filename: "zzz_last_Preview.png")
+      end
+
+      it "prioritizes _Preview file over alphabetically earlier regular images" do
+        expect { described_class.perform_now(model.id) }
+          .to change { model.reload.preview_file&.filename }.to("zzz_last_Preview.png")
+      end
+    end
+
+    context "when no _Preview file exists" do
+      before do
+        create(:model_file, model: model, filename: "normal_image.jpg")
+        create(:model_file, model: model, filename: "model.obj")
+      end
+
+      it "falls back to normal priority rules (image first)" do
+        expect { described_class.perform_now(model.id) }
+          .to change { model.reload.preview_file&.filename }.to("normal_image.jpg")
+      end
+    end
+  end
+
   it "raises exception if model ID is not found" do
     expect { described_class.perform_now(nil) }
       .to raise_error(ActiveRecord::RecordNotFound)
