@@ -1,0 +1,125 @@
+# 自定义 Manyfold Docker 镜像
+# 包含你的个人修改
+
+## COMMON BASE ##########################################
+
+FROM ruby:3.4.1-alpine AS base
+WORKDIR /usr/src/app
+
+RUN apk add --no-cache \
+  tzdata
+
+RUN gem install bundler -v 2.5.23
+RUN bundle config set --local deployment 'true'
+RUN bundle config set --local without 'development test'
+
+## BUILD STAGE ##########################################
+
+FROM base AS build
+
+RUN apk add --no-cache \
+  alpine-sdk \
+  gcompat \
+  bzip2 \
+  ca-certificates \
+  gmp-dev \
+  libffi-dev \
+  procps \
+  yaml-dev \
+  zlib-dev \
+  nodejs=~22.15.1 \
+  npm \
+  postgresql-dev \
+  mariadb-dev \
+  libarchive \
+  imagemagick \
+  imagemagick-jpeg \
+  imagemagick-webp \
+  imagemagick-heic \
+  assimp-dev
+
+COPY package.json .
+COPY yarn.lock .
+RUN npm install --global corepack
+RUN corepack enable yarn
+RUN yarn install
+
+COPY .ruby-version .
+COPY Gemfile* ./
+RUN bundle install
+
+# 复制所有文件，包括你的修改
+COPY . .
+RUN touch db/schema.rb
+RUN \
+  DATABASE_URL="nulldb://user:pass@localhost/db" \
+  SECRET_KEY_BASE="placeholder" \
+  RACK_ENV="production" \
+  RAILS_ASSETS_PRECOMPILE=1 \
+  bundle exec rake assets:precompile
+RUN rm db/schema.rb
+
+## RUNTIME STAGE ##########################################
+
+FROM base as runtime
+
+RUN apk add --no-cache \
+  file \
+  s6-overlay \
+  gcompat \
+  jemalloc \
+  imagemagick \
+  imagemagick-jpeg \
+  imagemagick-webp \
+  imagemagick-heic \
+  assimp-dev \
+  wget \
+  curl \
+  bash
+
+# 复制所有文件，包括你的中文化脚本
+COPY . .
+COPY --from=build /usr/src/app/vendor/bundle vendor/bundle
+COPY --from=build /usr/src/app/public/assets public/assets
+
+# Copy only the dynamic libraries we need from the build image
+COPY --from=build \
+  /usr/lib/libmariadb.so.* \
+  /usr/lib/libarchive.so.* \
+  /usr/lib/libacl.so.*\
+  /usr/lib/libexpat.so.* \
+  /usr/lib/liblzma.so.* \
+  /usr/lib/libzstd.so.* \
+  /usr/lib/liblz4.so.* \
+  /usr/lib/libbz2.so.* \
+  /usr/lib/libpq.so.* \
+  /usr/lib
+
+# Set up jemalloc and YJIT for performance
+ENV LD_PRELOAD="libjemalloc.so.2"
+ENV MALLOC_CONF="dirty_decay_ms:1000,narenas:2,background_thread:true"
+ENV RUBY_YJIT_ENABLE="1"
+
+# Runtime environment variables
+ENV PORT=3214
+ENV RACK_ENV=production
+ENV RAILS_ENV=production
+ENV NODE_ENV=production
+ENV RAILS_SERVE_STATIC_FILES=true
+ENV AWS_RESPONSE_CHECKSUM_VALIDATION=when_required
+ENV AWS_REQUEST_CHECKSUM_CALCULATION=when_required
+ENV PUID=0
+ENV PGID=0
+
+RUN gem install foreman
+
+# Tell s6 we're in a read-only root filesystem
+ENV S6_READ_ONLY_ROOT=1
+
+# Run the app itself as an s6 service
+COPY ./docker/s6-rc.d/manyfold/manyfold /etc/s6-overlay/s6-rc.d/manyfold
+COPY ./docker/s6-rc.d/manyfold/user/contents.d/manyfold /etc/s6-overlay/s6-rc.d/user/contents.d/manyfold
+
+EXPOSE 3214
+ENTRYPOINT ["/init"]
+
