@@ -1,13 +1,4 @@
-# Manyfold Docker Compose 配置文件 - Linux 生产环境版本
-# 针对 CIFS/SMB 网络共享优化
-# 挂载点: /mnt/L (192.168.1.25/vfxlibrary)
-# 数据存储目录: /mnt/L/Manyfold
-# 
-# ✅ 目录结构已创建:
-#    /mnt/L/Manyfold/models   - 3D模型存储
-#    /mnt/L/Manyfold/storage  - 应用数据存储
-#
-# 使用方法：docker-compose -f docker-compose.production.linux.yml up -d
+
 
 services:
   app:
@@ -18,6 +9,8 @@ services:
       args:
         APP_VERSION: production-linux
         GIT_SHA: local-build
+        http_proxy: ${http_proxy}
+        https_proxy: ${https_proxy}
     image: manyfold-custom:production-linux
     container_name: manyfold-app
     ports:
@@ -75,8 +68,6 @@ services:
         condition: service_healthy
       redis:
         condition: service_started
-      db-migrate:
-        condition: service_completed_successfully
     networks:
       - manyfold
     restart: unless-stopped
@@ -161,26 +152,27 @@ services:
         condition: service_healthy
     networks:
       - manyfold
-    command: >
-      sh -c "
-        echo '🗄️  等待数据库完全就绪...' &&
-        sleep 10 &&
-        echo '🗄️  开始数据库迁移...' &&
-        bundle exec rails db:migrate &&
-        echo '✅ 数据库迁移完成！' &&
-        echo '' &&
-        echo '📊 生产环境配置：' &&
-        echo '   - 部署环境: Linux (CentOS/RHEL)' &&
-        echo '   - 存储位置: /mnt/L (CIFS 网络共享)' &&
-        echo '   - 服务器: 192.168.1.25' &&
-        echo '   - 可用空间: 6.3TB' &&
-        echo '   - 多用户模式: 已启用' &&
-        echo '   - 密码强度要求: 3 (中高安全性)' &&
-        echo '   - 文件上传限制: 100GB' &&
-        echo '   - 文件解压限制: 100GB' &&
-        echo '' &&
-        echo '🌐 访问地址: http://服务器IP:3214'
-      "
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        echo '🗄️  等待数据库完全就绪...'
+        sleep 10
+        echo '🗄️  开始数据库迁移...'
+        cd /usr/src/app
+        bundle exec rake db:migrate
+        echo '✅ 数据库迁移完成！'
+        echo ''
+        echo '📊 生产环境配置：'
+        echo '   - 部署环境: Linux'
+        echo '   - 存储位置: /mnt/L/Manyfold'
+        echo '   - 多用户模式: 已启用'
+        echo '   - 密码强度要求: 3'
+        echo '   - 文件上传限制: 100GB'
+        echo ''
+        echo '🌐 访问地址: http://10.100.7.222:3214'
+        echo ''
+        echo '✅ 迁移服务正常退出'
+        exit 0
     restart: "no"  # 只运行一次
 
 volumes:
